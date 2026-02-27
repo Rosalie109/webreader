@@ -95,23 +95,30 @@ async function handleWebRead() {
 
     toastr.info("正在调取 Jina Reader 解析网页...");
     
-    try {
-        // 使用 Jina Reader API 转换网页为 Markdown [方案参考]
-        const readerUrl = `https://r.jina.ai/${url}`;
+   try {
+        const readerUrl = `https://r.jina.ai/${url}`; // Jina官方推荐直接拼在后面
         
         const response = await fetch(readerUrl, {
             method: 'GET',
             headers: {
-                'X-Return-Format': 'markdown' // 强制返回Markdown格式，方便AI阅读
+                'X-Return-Format': 'markdown', 
+                // 'Authorization': 'Bearer 你的JINA_API_KEY' // 如果你有API Key，取消注释这行并填入
             }
         });
 
-        if (!response.ok) throw new Error("网页解析请求失败");
+        // 【修改1：精准捕获 HTTP 错误状态】
+        if (!response.ok) {
+            throw new Error(`Jina 返回错误: ${response.status} ${response.statusText}`);
+        }
 
         let webContent = await response.text();
         
-        // 1. 防止Token溢出：截取长度 [限制逻辑]
-        // 既保证了内容不丢失核心，又避免了爆掉上下文
+        // 【修改2：增加内容为空的校验】
+        if (!webContent || webContent.trim() === '') {
+            throw new Error("抓取成功但内容为空，可能被目标网站反爬拦截");
+        }
+
+        // 1. 防止Token溢出：截取长度
         const cleanContent = webContent.substring(0, maxLength);
 
         // 2. 构造发送给AI的消息模板
@@ -121,18 +128,16 @@ async function handleWebRead() {
                           `请结合网页内容和我的留言与我交谈。`;
 
         // 3. 将消息填入输入框并自动发送
-        // 这种方式最模拟真实对话，角色会根据该内容生成回复
         const textarea = document.getElementById('send_textarea');
         textarea.value = finalPrompt;
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         
         $('#send_button').trigger('click');
-
         toastr.success("网页内容已成功发送给 AI");
         $('#wr_url').val(''); // 清空链接框
 
     } catch (error) {
-        console.error("WebReader Error:", error);
-        toastr.error("解析失败，请检查链接是否有效或网络是否畅通");
+        // 【修改3：在控制台和UI上显示真实的错误原因】
+        console.error("WebReader Error Details:", error);
+        toastr.error(`${error.message}`, "网页解析失败");
     }
-}
