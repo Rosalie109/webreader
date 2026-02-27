@@ -1,112 +1,119 @@
-import { extension_settings, getContext } from '../../../extensions.js';
+import { extension_settings, getContext, saveSettingsDebounced } from '../../../extensions.js';
 
 const EXT_NAME = 'WebLinkReader';
 
-// 初始化基础配置 [cite: 2]
+// 初始化设置
 if (!extension_settings[EXT_NAME]) {
     extension_settings[EXT_NAME] = {
         maxLength: 2500,
-        defaultPrompt: ''
+        defaultPrompt: '请阅读以下网页内容，并结合我给你的留言进行回复。'
     };
 }
 
-// 确保在酒馆 DOM 加载后注入 UI 
+// 这里的监听器改为酒馆标准的模块加载方式
 $(document).ready(() => {
-    const interval = setInterval(() => {
-        const container = document.getElementById('extensions_settings');
-        if (container) {
-            clearInterval(interval);
-            initWebReaderUI(container);
-        }
-    }, 500);
-});
+    function addSettings() {
+        // 检查是否已经存在，避免重复注入
+        if ($('#web-reader-extension').length > 0) return;
 
-function initWebReaderUI(container) {
-    $('#web-reader-extension').remove();
+        const container = $('#extensions_settings');
+        if (!container.length) return;
 
-    // 使用与微信插件一致的 inline-drawer 结构确保兼容性 [cite: 8]
-    const html = `
-    <div id="web-reader-extension" class="inline-drawer">
-        <div class="inline-drawer-toggle inline-drawer-header">
-            <b>🌐 网页链接读取器</b>
-            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-        </div>
-        <div class="inline-drawer-content" style="display: none;">
-            <div style="padding: 10px;">
-                <div style="margin-bottom: 15px;">
+        const html = `
+        <div id="web-reader-extension" class="inline-drawer">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b>🌐 网页链接读取器</b>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content" style="display: none; padding: 10px;">
+                <div style="margin-bottom: 10px;">
                     <label>网页链接:</label>
-                    <input type="text" id="wr_url" class="text_pole" placeholder="小红书/微博/新闻链接..." style="width: 100%;">
+                    <input type="text" id="wr_url" class="text_pole" placeholder="粘贴链接..." style="width: 100%;">
                 </div>
-                <div style="margin-bottom: 15px;">
-                    <label>提示词 (想对TA说的话):</label>
-                    <textarea id="wr_user_prompt" class="text_pole" style="width: 100%; height: 60px;" placeholder="你看今天发生了这事..."></textarea>
+                <div style="margin-bottom: 10px;">
+                    <label>留言/指令:</label>
+                    <textarea id="wr_user_prompt" class="text_pole" style="width: 100%; height: 60px;" placeholder="例如：总结这篇文章"></textarea>
                 </div>
-                <div style="margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between;">
-                    <label>字数上限:</label>
-                    <input type="number" id="wr_max_length" class="text_pole" style="width: 50%;" value="${extension_settings[EXT_NAME].maxLength}">
+                <div style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+                    <label>长度限制:</label>
+                    <input type="number" id="wr_max_length" class="text_pole" style="width: 40%;" value="${extension_settings[EXT_NAME].maxLength}">
                 </div>
-                <button type="button" id="wr_execute" class="menu_button" style="width: 100%;">读取并发送</button>
+                <button type="button" id="wr_execute" class="menu_button" style="width: 100%;">读取网页并发送</button>
+                <p style="font-size: 0.8em; color: #888; margin-top: 8px;">* 使用 Jina Reader 解析 (r.jina.ai)</p>
             </div>
         </div>
-    </div>
-    `;
+        `;
 
-    container.insertAdjacentHTML('beforeend', html);
+        container.append(html);
 
-    // 修复无法展开的问题：使用与微信插件一致的事件委派或直接绑定 [cite: 23, 24, 25]
-    const drawerToggle = document.querySelector('#web-reader-extension .inline-drawer-toggle');
-    if (drawerToggle) {
-        drawerToggle.addEventListener('click', function() {
-            const content = this.nextElementSibling;
-            const isHidden = content.style.display === 'none';
-            content.style.display = isHidden ? 'block' : 'none';
-            const icon = this.querySelector('.inline-drawer-icon');
-            if (icon) {
-                isHidden ? icon.classList.replace('down', 'up') : icon.classList.replace('up', 'down');
-            }
+        // 核心修复：手动绑定折叠逻辑
+        $('#web-reader-extension .inline-drawer-toggle').on('click', function() {
+            const drawer = $(this).closest('.inline-drawer');
+            const content = drawer.children('.inline-drawer-content');
+            const icon = $(this).find('.inline-drawer-icon');
+            
+            content.stop(true, true).slideToggle(200);
+            icon.toggleClass('down up');
         });
+
+        // 绑定设置保存
+        $('#wr_max_length').on('input', function() {
+            extension_settings[EXT_NAME].maxLength = Number($(this).val());
+            saveSettingsDebounced();
+        });
+
+        // 绑定执行按钮
+        $('#wr_execute').on('click', handleWebRead);
     }
 
-    // 保存设置逻辑 [cite: 27, 39]
-    $('#wr_max_length').on('input', function() {
-        extension_settings[EXT_NAME].maxLength = Number($(this).val());
-        const ctx = getContext();
-        ctx.saveSettingsDebounced();
-    });
-
-    // 绑定执行按钮
-    $('#wr_execute').on('click', handleWebRead);
-}
+    // 每隔1秒检查一次，直到容器加载完成（酒馆切页面时可能需要重新检查）
+    setInterval(addSettings, 1000);
+});
 
 async function handleWebRead() {
     const url = $('#wr_url').val().trim();
-    const userPrompt = $('#wr_user_prompt').val().trim();
+    const userPrompt = $('#wr_user_prompt').val().trim() || extension_settings[EXT_NAME].defaultPrompt;
     const maxLength = extension_settings[EXT_NAME].maxLength;
 
-    if (!url) return toastr.error("请输入链接");
-    if (window.is_generating) return toastr.warning("AI 正在生成中...");
+    if (!url) {
+        toastr.error("请输入有效的网页链接");
+        return;
+    }
 
-    toastr.info("正在通过 Jina Reader 爬取网页...");
+    // 检查是否正在生成
+    if ($('#send_button').is(':hidden')) { 
+        toastr.warning("AI 正在思考中，请稍后再试");
+        return;
+    }
 
+    toastr.info("正在解析网页...");
+    
     try {
-        const response = await fetch(`https://r.jina.ai/${url}`);
-        if (!response.ok) throw new Error("网络请求失败");
-        
+        const readerUrl = `https://r.jina.ai/${url}`;
+        const response = await fetch(readerUrl);
+
+        if (!response.ok) throw new Error("无法访问 Jina Reader");
+
         let webContent = await response.text();
-        const cleanContent = webContent.substring(0, maxLength); // 截断防止溢出
+        const cleanContent = webContent.substring(0, maxLength);
 
-        // 构造最终发送给 AI 的指令
-        const finalPrompt = `[系统指令：用户分享了一个网页内容如下：\n\n${cleanContent}\n\n用户留言：${userPrompt || "你看这事你怎么看？"}]`;
+        const finalPrompt = `【系统：网页内容已读取】\n\n` +
+                          `内容：\n---\n${cleanContent}\n---\n\n` +
+                          `指令：${userPrompt}`;
 
-        // 模拟输入并发送
-        const textarea = document.getElementById('send_textarea');
-        textarea.value = finalPrompt;
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        // 直接通过酒馆内部函数发送（比模拟点击更稳定）
+        const context = getContext();
+        await context.setVariable('web_content', cleanContent); // 可选：存入变量
+        
+        // 模拟填入输入框并发送
+        $('#send_textarea').val(finalPrompt).trigger('input');
         $('#send_button').trigger('click');
 
-        toastr.success("内容已解析并发送");
+        toastr.success("已发送至 AI");
         $('#wr_url').val(''); 
+
     } catch (error) {
-        toastr.error("爬取出错，请检查链接或网络");
+        console.error("WebReader Error:", error);
+        toastr.error("解析失败，可能是由于网络波动或链接不受支持");
     }
 }
