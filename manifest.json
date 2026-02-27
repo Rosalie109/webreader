@@ -1,5 +1,5 @@
 {
-    "name": "WebReader",
+    "name": "WebLinkReader",
     "display_name": "网页读取器",
     "description": "输入链接自动发给角色",
     "version": "1.0.0",
