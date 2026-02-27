@@ -51,14 +51,23 @@ function initWebReaderUI(container) {
     `;
 
     container.insertAdjacentHTML('beforeend', html);
-
-    // 折叠面板交互逻辑 [cite: 23, 24, 25]
-    $('#web-reader-extension .inline-drawer-toggle').on('click', function() {
-        const content = $(this).next('.inline-drawer-content');
-        content.slideToggle(200);
-        $(this).find('.inline-drawer-icon').toggleClass('down up');
-    });
-
+// 折叠面板交互逻辑（修复版）
+    const drawerToggle = document.querySelector('#web-reader-extension .inline-drawer-toggle');
+    if (drawerToggle) {
+        drawerToggle.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation(); // 关键：阻止事件冒泡给酒馆核心层
+            const icon = this.querySelector('.inline-drawer-icon');
+            const content = this.nextElementSibling;
+            if (content) {
+                const isHidden = content.style.display === 'none';
+                content.style.display = isHidden ? 'block' : 'none';
+                if (icon) {
+                    isHidden ? icon.classList.replace('down', 'up') : icon.classList.replace('up', 'down');
+                }
+            }
+        });
+    }
     // 绑定保存设置事件
     $('#wr_max_length').on('input', function() {
         extension_settings[EXT_NAME].maxLength = Number($(this).val());
