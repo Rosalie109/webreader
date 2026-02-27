@@ -141,3 +141,4 @@ async function handleWebRead() {
         console.error("WebReader Error Details:", error);
         toastr.error(`${error.message}`, "网页解析失败");
     }
+}
